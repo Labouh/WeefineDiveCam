@@ -44,64 +44,61 @@ fun CameraHudOverlay(
         else -> Color.Green
     }
 
-    // Explicitly using a solid background and high Z-index for testing
-    Box(
+    // Single-line strip: the app is mostly used in landscape, keep the frame clear
+    Row(
         modifier = modifier
             .zIndex(10f)
-            .padding(16.dp)
-            .background(Color.Black.copy(alpha = 0.7f), shape = RoundedCornerShape(12.dp))
-            .padding(16.dp)
+            .background(Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // --- Left: Depth & Temp ---
-            Column {
-                if (uiState.diveStartTime != null) {
-                    val elapsedSeconds = (currentTime - uiState.diveStartTime) / 1000
-                    val minutes = elapsedSeconds / 60
-                    val seconds = elapsedSeconds % 60
-                    Text(
-                        text = String.format("%02d:%02d", minutes, seconds),
-                        color = Color.Cyan,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Text(
-                    text = "${String.format("%.1f", uiState.depth)} m",
-                    color = Color.White,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            // --- Middle: Mode ---
-            Icon(
-                imageVector = if (uiState.cameraMode == CameraMode.PHOTO) Icons.Default.CameraAlt else Icons.Default.Videocam,
-                contentDescription = "Mode",
-                tint = if (uiState.isRecording) Color.Red else Color.White,
-                modifier = Modifier.size(32.dp)
+        if (uiState.diveStartTime != null) {
+            val elapsedSeconds = (currentTime - uiState.diveStartTime) / 1000
+            Text(
+                text = String.format("%02d:%02d", elapsedSeconds / 60, elapsedSeconds % 60),
+                color = Color.Cyan,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
             )
-
-            // --- Right: Battery ---
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = "${uiState.housingBattery}%",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "BATT",
-                    color = batteryColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
         }
+        Text(
+            text = "${String.format("%.1f", uiState.depth)} m",
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "${String.format("%.1f", uiState.temperature)} °C",
+            color = Color.White,
+            fontSize = 14.sp
+        )
+        Icon(
+            imageVector = if (uiState.cameraMode == CameraMode.PHOTO) Icons.Default.CameraAlt else Icons.Default.Videocam,
+            contentDescription = "Mode",
+            tint = if (uiState.isRecording) Color.Red else Color.White,
+            modifier = Modifier.size(20.dp)
+        )
+        Text(
+            text = if (uiState.isDepthFilterEnabled) "FILTER ON" else "FILTER OFF",
+            color = if (uiState.isDepthFilterEnabled) Color(0xFFFF8A65) else Color.Gray,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold
+        )
+        if (!uiState.isBluetoothConnected) {
+            Text(
+                text = "HOUSING LOST",
+                color = Color.Red,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Text(
+            text = "BATT ${uiState.housingBattery}%",
+            color = batteryColor,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -113,6 +110,7 @@ fun DiveCameraScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         // Camera is at the bottom (Z=0)
         CameraPreview(
+            colorGains = uiState.colorGains,
             modifier = Modifier.fillMaxSize(),
             onCameraReady = onCameraReady
         )
@@ -122,8 +120,8 @@ fun DiveCameraScreen(
             uiState = uiState,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 80.dp) // Move down significantly for housing
-                .fillMaxWidth(0.9f)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)) // Stay below the status bar
+                .padding(top = 4.dp)
         )
     }
 }

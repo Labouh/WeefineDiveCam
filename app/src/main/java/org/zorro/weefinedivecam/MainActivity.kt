@@ -12,6 +12,7 @@ import androidx.activity.viewModels
 import androidx.camera.core.Camera
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageProxy
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
@@ -35,6 +36,8 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -67,6 +70,9 @@ fun MainPermissionChecker(onPermissionsGranted: @Composable () -> Unit) {
 class MainActivity : ComponentActivity() {
 
     private val viewModel: DiveViewModel by viewModels()
+
+    // Full-resolution photo correction runs here, one shot at a time
+    private val photoExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -107,6 +113,10 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        LaunchedEffect(activeCamera, uiState.isDepthFilterEnabled) {
+                            activeCamera?.let { applyWhiteBalance(it, daylight = uiState.isDepthFilterEnabled) }
+                        }
+
                         Box(modifier = Modifier.fillMaxSize()) {
                             // Camera Layer
                             DiveCameraScreen(
@@ -118,8 +128,9 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
 
-                            // Connection Layer (on top)
-                            if (!uiState.isBluetoothConnected) {
+                            // Connection Layer (on top). Only until a housing is chosen: a BLE dropout
+                            // mid-dive must not cover the camera, the manager reconnects on its own.
+                            if (uiState.housingAddress == null) {
                                 ScanWindow(
                                     discoveredDevices = uiState.discoveredDevices,
                                     isScanning = uiState.isScanning,
@@ -136,28 +147,23 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun capturePhoto(imageCapture: ImageCapture) {
-        val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, "IMG_DIVE_$name")
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/WeefineDiveCam")
-        }
-
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(
-            contentResolver,
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            contentValues
-        ).build()
+        // Snapshot the telemetry at shutter time, not when processing finishes
+        val state = viewModel.uiState.value
 
         imageCapture.takePicture(
-            outputOptions,
-            ContextCompat.getMainExecutor(this),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    Toast.makeText(baseContext, "Photo Saved!", Toast.LENGTH_SHORT).show()
+            photoExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    val message = try {
+                        saveCorrectedPhoto(this@MainActivity, image, state.colorGains, state.depth, state.temperature)
+                        "Photo Saved!"
+                    } catch (e: Exception) {
+                        "Save failed: ${e.message}"
+                    }
+                    runOnUiThread { Toast.makeText(baseContext, message, Toast.LENGTH_SHORT).show() }
                 }
                 override fun onError(exc: ImageCaptureException) {
-                    Toast.makeText(baseContext, "Capture failed: ${exc.message}", Toast.LENGTH_SHORT).show()
+                    runOnUiThread { Toast.makeText(baseContext, "Capture failed: ${exc.message}", Toast.LENGTH_SHORT).show() }
                 }
             }
         )
@@ -196,5 +202,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        photoExecutor.shutdown() // Lets queued photos finish saving
     }
 }

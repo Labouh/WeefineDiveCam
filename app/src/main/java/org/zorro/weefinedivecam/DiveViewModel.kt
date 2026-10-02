@@ -74,7 +74,12 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
 
     fun connectToDevice(macAddress: String) {
         stopScanning()
+        _uiState.update { it.copy(housingAddress = macAddress) }
         bleManager?.connect(macAddress)
+    }
+
+    fun toggleDepthFilter() {
+        _uiState.update { it.copy(isDepthFilterEnabled = !it.isDepthFilterEnabled) }
     }
 
     private fun handleHousingButton(code: Int) {
@@ -113,7 +118,7 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
                     _cameraActionEvent.emit("ZOOM_IN")
                 }
             }
-            0x30 -> { /* TODO: Menu / OK */ }
+            0x30 -> toggleDepthFilter() // Menu / OK
             0x50 -> { // Filter / -
                 viewModelScope.launch {
                     _cameraActionEvent.emit("ZOOM_OUT")
@@ -122,16 +127,8 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun calculateDecompression() {
-        // This is exactly where your open-source Bühlmann ZHL-16C algorithm hooks in.
-        // It reads current UI state depth, computes tissue compartment gas pressures,
-        // and updates the NDL or ceiling limits.
-        val computedNdl = 45 // Dummy output calculation
-        _uiState.update { it.copy(ndl = computedNdl) }
-    }
-
     fun startHousingConnection(macAddress: String) {
-        bleManager?.connect(macAddress)
+        connectToDevice(macAddress)
     }
 
     override fun onCleared() {
