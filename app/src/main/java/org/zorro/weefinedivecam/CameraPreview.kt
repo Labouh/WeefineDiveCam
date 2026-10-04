@@ -78,7 +78,7 @@ fun CameraPreview(
 
                 val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
-                // Photos bypass the GPU effect: they are corrected at full resolution in saveCorrectedPhoto()
+                // Photos bypass the GPU effect: they are corrected at full resolution in saveDivePhoto()
                 val useCases = UseCaseGroup.Builder()
                     .addUseCase(preview)
                     .addUseCase(imageCapture)
@@ -104,15 +104,15 @@ fun CameraPreview(
 }
 
 /**
- * The depth filter models the colour loss against daylight, so auto white balance must be
- * off while it is active; otherwise both try to cancel the blue cast.
+ * The depth filter models the colour loss against daylight, so auto white balance must stay
+ * off; otherwise both try to cancel the blue cast. It stays off even with the filter disabled
+ * so the saved originals have consistent colours that post-processing can correct later.
  */
 @OptIn(ExperimentalCamera2Interop::class)
-fun applyWhiteBalance(camera: Camera, daylight: Boolean) {
-    val awbMode = if (daylight) CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT else CaptureRequest.CONTROL_AWB_MODE_AUTO
+fun lockDaylightWhiteBalance(camera: Camera) {
     Camera2CameraControl.from(camera.cameraControl).setCaptureRequestOptions(
         CaptureRequestOptions.Builder()
-            .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, awbMode)
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT)
             .build()
     )
 }

@@ -28,8 +28,9 @@ data class DiveUiState(
     val housingBattery: Int = 100,
     val diveStartTime: Long? = null,
     val isDepthFilterEnabled: Boolean = true,
+    val waterType: WaterType = WaterType.CLEAR_OCEAN,
     val sleepLevel: SleepLevel = SleepLevel.AWAKE
 ) {
     val colorGains: ColorGains
-        get() = if (isDepthFilterEnabled) WaterColorCorrection.gains(depth) else ColorGains.IDENTITY
+        get() = if (isDepthFilterEnabled) WaterColorCorrection.gains(depth, waterType) else ColorGains.IDENTITY
 }

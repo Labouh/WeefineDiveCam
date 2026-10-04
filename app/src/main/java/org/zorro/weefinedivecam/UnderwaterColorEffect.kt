@@ -25,7 +25,7 @@ import java.util.concurrent.Executor
 /**
  * Applies the depth colour correction on the GPU to the preview and video streams, so
  * the diver sees on screen exactly what gets recorded.
- * Photos are corrected at full resolution in [saveCorrectedPhoto] instead.
+ * Photos are corrected at full resolution in [saveDivePhoto] instead.
  */
 class UnderwaterColorEffect(processor: UnderwaterColorProcessor) : CameraEffect(
     PREVIEW or VIDEO_CAPTURE,

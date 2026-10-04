@@ -13,34 +13,40 @@ data class ColorGains(val red: Float, val green: Float, val blue: Float) {
 }
 
 /**
+ * Effective attenuation (1/m) of the broadband red/green/blue camera channels.
+ * Starting points to be tuned against real photos, not measurements.
+ */
+enum class WaterType(val label: String, val kRed: Double, val kGreen: Double, val kBlue: Double) {
+    // Blue tropical/Mediterranean water: blue travels furthest, red goes first.
+    // Pure water absorbs ~0.35/m at 650 nm, but the sensor's red channel also picks up orange.
+    CLEAR_OCEAN("Ocean", 0.22, 0.06, 0.035),
+
+    // Plankton and particles also absorb blue: green travels furthest, cast turns blue-green.
+    COASTAL("Coastal", 0.30, 0.09, 0.12),
+
+    // Dissolved organic matter absorbs blue strongly: green cast.
+    GREEN_LAKE("Lake", 0.40, 0.15, 0.35)
+}
+
+/**
  * Depth-based colour correction for underwater images.
  *
- * Water absorbs long wavelengths first: red is mostly gone below ~5 m and orange/yellow
- * by ~15 m, leaving a blue-green cast. Light reaching the lens has travelled down from
- * the surface (depth) and then from the subject to the camera (distance), so each
- * channel is attenuated by exp(-k * path). The correction undoes this with per-channel
- * gains relative to blue (the least absorbed channel), so overall exposure stays close
+ * Water absorbs each wavelength at its own rate. Light reaching the lens has travelled down
+ * from the surface (depth) and then from the subject to the camera (distance), so each
+ * channel is attenuated by exp(-k * path) (Beer-Lambert). The correction undoes this with
+ * per-channel gains relative to the least absorbed channel, so overall exposure stays close
  * to where auto-exposure put it.
  *
  * Gains are computed in linear light, then converted for gamma-encoded pixels: a
  * per-channel scale commutes with the power-law curve, (g * L)^(1/γ) = g^(1/γ) * L^(1/γ),
  * so the GPU shader and the photo ColorMatrix can skip linearising.
  *
- * This assumes the camera's white balance is fixed at daylight (see [applyWhiteBalance]).
- * Otherwise auto white balance also tries to cancel the blue cast and the image ends up
- * over-corrected.
+ * This assumes the camera's white balance is fixed at daylight (see [lockDaylightWhiteBalance]).
+ * Otherwise auto white balance also tries to cancel the cast and the image ends up over-corrected.
  */
 object WaterColorCorrection {
-    // Effective attenuation (1/m) for the broadband red/green/blue camera channels in
-    // clear coastal sea water. Pure water absorbs ~0.35/m at 650 nm, but the sensor's
-    // red channel also picks up orange light, which travels further.
-    private const val K_RED = 0.22
-    private const val K_GREEN = 0.06
-    private const val K_BLUE = 0.035
-
-    // Stronger gains only amplify sensor noise: beyond ~15 m there is no red left to recover.
-    private const val MAX_RED_GAIN = 4.0
-    private const val MAX_GREEN_GAIN = 1.6
+    // Stronger gains only amplify sensor noise: past this there is no signal left to recover.
+    private const val MAX_GAIN = 4.0
 
     /** Below this depth the housing is treated as being at the surface or out of the water. */
     private const val MIN_DEPTH_M = 0.3
@@ -54,19 +60,24 @@ object WaterColorCorrection {
      */
     fun gains(
         depthMeters: Double,
+        waterType: WaterType,
         subjectDistanceMeters: Double = 1.0,
         strength: Double = 1.0
     ): ColorGains {
         if (depthMeters < MIN_DEPTH_M) return ColorGains.IDENTITY
 
         val path = depthMeters + subjectDistanceMeters
-        val red = exp((K_RED - K_BLUE) * path).coerceAtMost(MAX_RED_GAIN)
-        val green = exp((K_GREEN - K_BLUE) * path).coerceAtMost(MAX_GREEN_GAIN)
+        val kReference = minOf(waterType.kRed, waterType.kGreen, waterType.kBlue)
+
+        fun channelGain(k: Double): Float {
+            val linear = exp((k - kReference) * path).coerceAtMost(MAX_GAIN)
+            return toEncoded(1 + (linear - 1) * strength)
+        }
 
         return ColorGains(
-            red = toEncoded(1 + (red - 1) * strength),
-            green = toEncoded(1 + (green - 1) * strength),
-            blue = 1f
+            red = channelGain(waterType.kRed),
+            green = channelGain(waterType.kGreen),
+            blue = channelGain(waterType.kBlue)
         )
     }
 

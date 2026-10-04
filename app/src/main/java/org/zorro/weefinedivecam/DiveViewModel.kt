@@ -1,6 +1,7 @@
 package org.zorro.weefinedivecam
 
 import android.app.Application
+import android.content.Context
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,7 +19,15 @@ import kotlin.time.Duration.Companion.seconds
 
 class DiveViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _uiState = MutableStateFlow(DiveUiState())
+    private val settings = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    private val _uiState = MutableStateFlow(
+        DiveUiState(
+            waterType = settings.getString(KEY_WATER_TYPE, null)
+                ?.let { saved -> WaterType.entries.firstOrNull { it.name == saved } }
+                ?: WaterType.CLEAR_OCEAN
+        )
+    )
     val uiState: StateFlow<DiveUiState> = _uiState.asStateFlow()
 
     // A one-shot event stream for triggering physical actions
@@ -122,6 +131,12 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isDepthFilterEnabled = !it.isDepthFilterEnabled) }
     }
 
+    /** Chosen before the dive for each site; remembered across launches. */
+    fun setWaterType(waterType: WaterType) {
+        settings.edit().putString(KEY_WATER_TYPE, waterType.name).apply()
+        _uiState.update { it.copy(waterType = waterType) }
+    }
+
     private fun handleHousingButton(code: Int) {
         lastActivityAt = SystemClock.elapsedRealtime()
 
@@ -186,6 +201,7 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         val SCREEN_OFF_AFTER = 1.minutes
         val CAMERA_OFF_AFTER = 5.minutes
+        const val KEY_WATER_TYPE = "water_type"
     }
 
     override fun onCleared() {

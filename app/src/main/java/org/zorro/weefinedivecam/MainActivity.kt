@@ -32,7 +32,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -50,7 +55,14 @@ fun MainPermissionChecker(onPermissionsGranted: @Composable () -> Unit) {
         )
     )
 
+    // The microphone is optional: without it videos are simply silent, so it doesn't block the app.
+    // Asked separately so installs that already granted the others still get the prompt.
+    val audioPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+
     if (permissionsState.allPermissionsGranted) {
+        LaunchedEffect(Unit) {
+            if (!audioPermission.status.isGranted) audioPermission.launchPermissionRequest()
+        }
         onPermissionsGranted()
     } else {
         Box(modifier = Modifier.fillMaxSize().background(Color.DarkGray), contentAlignment = Alignment.Center) {
@@ -79,8 +91,16 @@ class MainActivity : ComponentActivity() {
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        // Full screen: the white status/navigation bars would glow over the black sleep screen.
+        // A swipe from the edge shows them briefly.
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
+
         setContent {
             val uiState by viewModel.uiState.collectAsState()
+            val phoneBattery = rememberPhoneBatteryLevel()
 
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
@@ -89,6 +109,7 @@ class MainActivity : ComponentActivity() {
                         var activeVideoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
                         var activeCamera by remember { mutableStateOf<Camera?>(null) }
                         var currentRecording by remember { mutableStateOf<Recording?>(null) }
+                        var showSettings by remember { mutableStateOf(false) }
 
                         LaunchedEffect(Unit) {
                             viewModel.cameraActionEvent.collect { event ->
@@ -122,14 +143,16 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        LaunchedEffect(activeCamera, uiState.isDepthFilterEnabled) {
-                            activeCamera?.let { applyWhiteBalance(it, daylight = uiState.isDepthFilterEnabled) }
+                        LaunchedEffect(activeCamera) {
+                            activeCamera?.let { lockDaylightWhiteBalance(it) }
                         }
 
                         Box(modifier = Modifier.fillMaxSize()) {
                             // Camera Layer
                             DiveCameraScreen(
                                 uiState = uiState,
+                                phoneBattery = phoneBattery,
+                                onOpenSettings = { showSettings = true },
                                 onCameraReady = { boundCapture, boundVideo, boundCamera ->
                                     activeImageCapture = boundCapture
                                     activeVideoCapture = boundVideo
@@ -149,11 +172,20 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                            if (showSettings) {
+                                SettingsDialog(
+                                    waterType = uiState.waterType,
+                                    onWaterTypeSelected = { viewModel.setWaterType(it) },
+                                    onDismiss = { showSettings = false }
+                                )
+                            }
+
                             // Battery saver: black screen over everything
                             if (uiState.sleepLevel != SleepLevel.AWAKE) {
                                 SleepOverlay(
                                     depth = uiState.depth,
                                     temperature = uiState.temperature,
+                                    phoneBattery = phoneBattery,
                                     onTap = { viewModel.wakeUp() }
                                 )
                             }
@@ -173,8 +205,7 @@ class MainActivity : ComponentActivity() {
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
                     val message = try {
-                        saveCorrectedPhoto(this@MainActivity, image, state.colorGains, state.depth, state.temperature)
-                        "Photo Saved!"
+                        if (saveDivePhoto(this@MainActivity, image, state)) "Photo saved (+ corrected)" else "Photo saved"
                     } catch (e: Exception) {
                         "Save failed: ${e.message}"
                     }

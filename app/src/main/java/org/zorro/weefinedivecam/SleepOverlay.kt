@@ -3,9 +3,13 @@ package org.zorro.weefinedivecam
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,6 +27,8 @@ import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.time.Duration.Companion.minutes
 
+private val DIM_GREY = Color(0xFF3A3A3A)
+
 // Small offsets cycled every minute so the static text doesn't burn into the OLED panel
 private val BURN_IN_OFFSETS = listOf(0 to 0, 24 to 12, -24 to 24, 12 to -16, -12 to -8)
 
@@ -35,6 +41,7 @@ private val BURN_IN_OFFSETS = listOf(0 to 0, 24 to 12, -24 to 24, 12 to -16, -12
 fun SleepOverlay(
     depth: Double,
     temperature: Double,
+    phoneBattery: Int?,
     onTap: () -> Unit, // Touch doesn't work through the housing, handy on land
     modifier: Modifier = Modifier
 ) {
@@ -55,11 +62,19 @@ fun SleepOverlay(
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onTap),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = String.format(Locale.getDefault(), "%.1f m   %.1f °C", depth, temperature),
-            color = Color(0xFF3A3A3A),
-            fontSize = 20.sp,
-            modifier = Modifier.offset(dx.dp, dy.dp)
-        )
+        Row(
+            modifier = Modifier.offset(dx.dp, dy.dp),
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = String.format(Locale.getDefault(), "%.1f m   %.1f °C", depth, temperature),
+                color = DIM_GREY,
+                fontSize = 20.sp
+            )
+            if (phoneBattery != null) {
+                BatteryIndicator(Icons.Default.Smartphone, "Phone battery", phoneBattery, tint = DIM_GREY, fontSize = 20.sp)
+            }
+        }
     }
 }
