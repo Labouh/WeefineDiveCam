@@ -39,7 +39,11 @@ fun CameraPreview(
     // GPU colour correction shared by the preview and video streams
     val colorProcessor = remember { UnderwaterColorProcessor() }
     DisposableEffect(colorProcessor) {
-        onDispose { colorProcessor.release() }
+        onDispose {
+            // Stop the camera when the preview leaves the screen (deep sleep), not only on destroy
+            if (cameraProviderFuture.isDone) cameraProviderFuture.get().unbindAll()
+            colorProcessor.release()
+        }
     }
     SideEffect { colorProcessor.gains = colorGains }
 

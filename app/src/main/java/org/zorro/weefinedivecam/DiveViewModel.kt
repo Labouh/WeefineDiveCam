@@ -1,6 +1,7 @@
 package org.zorro.weefinedivecam
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,7 +11,10 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 class DiveViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -22,6 +26,10 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
     val cameraActionEvent: SharedFlow<String> = _cameraActionEvent.asSharedFlow()
 
     private var bleManager: WeefineBluetoothManager? = null
+
+    // Last housing button press (elapsedRealtime), drives the automatic sleep levels
+    @Volatile
+    private var lastActivityAt = SystemClock.elapsedRealtime()
 
     init {
         bleManager = WeefineBluetoothManager(
@@ -43,6 +51,8 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
             },
             onConnectionChanged = { isConnected ->
                 _uiState.update { it.copy(isBluetoothConnected = isConnected) }
+                // Without the housing no button can wake the screen: show the camera and the warning
+                if (!isConnected) wakeUp()
             },
             onDeviceFound = { newDevice ->
                 _uiState.update { state ->
@@ -60,6 +70,36 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
             }
         )
 
+        viewModelScope.launch {
+            while (true) {
+                delay(1.seconds)
+                updateSleepLevel()
+            }
+        }
+    }
+
+    private fun updateSleepLevel() {
+        val state = _uiState.value
+        // Never sleep while filming, before a housing is chosen, or when its buttons can't wake us
+        if (state.isRecording || state.housingAddress == null || !state.isBluetoothConnected) {
+            lastActivityAt = SystemClock.elapsedRealtime()
+            return
+        }
+        val idleMillis = SystemClock.elapsedRealtime() - lastActivityAt
+        val target = when {
+            idleMillis >= CAMERA_OFF_AFTER.inWholeMilliseconds -> SleepLevel.CAMERA_OFF
+            idleMillis >= SCREEN_OFF_AFTER.inWholeMilliseconds -> SleepLevel.SCREEN_OFF
+            else -> SleepLevel.AWAKE
+        }
+        // Only deepen automatically; waking up is always explicit
+        if (target > state.sleepLevel) {
+            _uiState.update { it.copy(sleepLevel = target) }
+        }
+    }
+
+    fun wakeUp() {
+        lastActivityAt = SystemClock.elapsedRealtime()
+        _uiState.update { it.copy(sleepLevel = SleepLevel.AWAKE) }
     }
 
     fun startScanning() {
@@ -83,6 +123,14 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun handleHousingButton(code: Int) {
+        lastActivityAt = SystemClock.elapsedRealtime()
+
+        // While asleep any button only wakes up, so a press never fires a blind shot
+        if (_uiState.value.sleepLevel != SleepLevel.AWAKE) {
+            wakeUp()
+            return
+        }
+
         when (code) {
             0x20 -> { // Shutter Button clicked on Weefine housing
                 viewModelScope.launch {
@@ -100,7 +148,11 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-            0x61 -> { /* TODO: MF/AF */ }
+            0x61 -> { // MF/AF: manual deep sleep. Ignored while filming so a stray press can't end a video
+                if (!_uiState.value.isRecording) {
+                    _uiState.update { it.copy(sleepLevel = SleepLevel.CAMERA_OFF) }
+                }
+            }
             0x10 -> { // Mode / Back
                 viewModelScope.launch {
                     val currentState = _uiState.value
@@ -129,6 +181,11 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startHousingConnection(macAddress: String) {
         connectToDevice(macAddress)
+    }
+
+    private companion object {
+        val SCREEN_OFF_AFTER = 1.minutes
+        val CAMERA_OFF_AFTER = 5.minutes
     }
 
     override fun onCleared() {

@@ -9,6 +9,13 @@ enum class CameraMode {
     PHOTO, VIDEO
 }
 
+/** Battery saving levels, ordered from awake to deepest sleep. */
+enum class SleepLevel {
+    AWAKE,
+    SCREEN_OFF, // Black screen, camera still running: wakes instantly
+    CAMERA_OFF  // Black screen and camera unbound: ~1 s to restart
+}
+
 data class DiveUiState(
     val depth: Double = 0.0,
     val temperature: Double = 0.0,
@@ -20,7 +27,8 @@ data class DiveUiState(
     val discoveredDevices: List<DiscoveredDevice> = emptyList(),
     val housingBattery: Int = 100,
     val diveStartTime: Long? = null,
-    val isDepthFilterEnabled: Boolean = true
+    val isDepthFilterEnabled: Boolean = true,
+    val sleepLevel: SleepLevel = SleepLevel.AWAKE
 ) {
     val colorGains: ColorGains
         get() = if (isDepthFilterEnabled) WaterColorCorrection.gains(depth) else ColorGains.IDENTITY

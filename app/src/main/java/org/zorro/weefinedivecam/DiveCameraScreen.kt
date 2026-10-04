@@ -108,12 +108,14 @@ fun DiveCameraScreen(
     onCameraReady: (ImageCapture, VideoCapture<Recorder>, Camera) -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
-        // Camera is at the bottom (Z=0)
-        CameraPreview(
-            colorGains = uiState.colorGains,
-            modifier = Modifier.fillMaxSize(),
-            onCameraReady = onCameraReady
-        )
+        // Camera is at the bottom (Z=0). Leaving composition unbinds it (deep sleep)
+        if (uiState.sleepLevel != SleepLevel.CAMERA_OFF) {
+            CameraPreview(
+                colorGains = uiState.colorGains,
+                modifier = Modifier.fillMaxSize(),
+                onCameraReady = onCameraReady
+            )
+        }
 
         // HUD is on top (Z=10)
         CameraHudOverlay(

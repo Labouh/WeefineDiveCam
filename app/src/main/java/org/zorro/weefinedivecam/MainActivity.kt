@@ -113,6 +113,15 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        // The unbound use cases are unusable after a deep sleep; fresh ones arrive via onCameraReady
+                        LaunchedEffect(uiState.sleepLevel) {
+                            if (uiState.sleepLevel == SleepLevel.CAMERA_OFF) {
+                                activeImageCapture = null
+                                activeVideoCapture = null
+                                activeCamera = null
+                            }
+                        }
+
                         LaunchedEffect(activeCamera, uiState.isDepthFilterEnabled) {
                             activeCamera?.let { applyWhiteBalance(it, daylight = uiState.isDepthFilterEnabled) }
                         }
@@ -137,6 +146,15 @@ class MainActivity : ComponentActivity() {
                                     onStartScan = { viewModel.startScanning() },
                                     onStopScan = { viewModel.stopScanning() },
                                     onDeviceSelected = { viewModel.connectToDevice(it) }
+                                )
+                            }
+
+                            // Battery saver: black screen over everything
+                            if (uiState.sleepLevel != SleepLevel.AWAKE) {
+                                SleepOverlay(
+                                    depth = uiState.depth,
+                                    temperature = uiState.temperature,
+                                    onTap = { viewModel.wakeUp() }
                                 )
                             }
                         }
