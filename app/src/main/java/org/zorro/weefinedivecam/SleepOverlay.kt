@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
-import java.util.Locale
 import kotlin.time.Duration.Companion.minutes
 
 private val DIM_GREY = Color(0xFF3A3A3A)
@@ -33,14 +32,13 @@ private val DIM_GREY = Color(0xFF3A3A3A)
 private val BURN_IN_OFFSETS = listOf(0 to 0, 24 to 12, -24 to 24, 12 to -16, -12 to -8)
 
 /**
- * Black screen shown while asleep. Black pixels are switched off on an OLED panel, so this
- * costs almost nothing, unlike a camera preview at full brightness. Depth and temperature
- * stay visible in dim grey.
+ * Black screen shown while asleep or when the housing is lost. Black pixels are switched off
+ * on an OLED panel, so this costs almost nothing, unlike a camera preview at full brightness.
+ * [message] (depth and temperature, or the lost connection) stays visible in dim grey.
  */
 @Composable
 fun SleepOverlay(
-    depth: Double,
-    temperature: Double,
+    message: String,
     phoneBattery: Int?,
     onTap: () -> Unit, // Touch doesn't work through the housing, handy on land
     modifier: Modifier = Modifier
@@ -68,7 +66,7 @@ fun SleepOverlay(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = String.format(Locale.getDefault(), "%.1f m   %.1f °C", depth, temperature),
+                text = message,
                 color = DIM_GREY,
                 fontSize = 20.sp
             )

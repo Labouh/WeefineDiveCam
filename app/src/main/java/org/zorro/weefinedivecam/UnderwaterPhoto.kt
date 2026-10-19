@@ -4,8 +4,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Paint
@@ -25,15 +23,15 @@ private const val ORIGINALS_DIR = "Pictures/WeefineDiveCam/Original"
  * Saves a captured frame to the gallery:
  * - always the untouched original (camera JPEG bytes, no re-encoding) in [ORIGINALS_DIR],
  *   so the correction can be redone later with other settings;
- * - plus, when the depth filter is on and has something to correct, a full-resolution
- *   corrected copy in [CORRECTED_DIR].
+ * - plus, when the depth filter is on and the housing is under water, a full-resolution
+ *   copy corrected by [UnderwaterAutoCorrection] in [CORRECTED_DIR].
  *
  * Dive data goes into the EXIF user comment as key=value pairs for later post-processing.
  * Call this from a background thread: it decodes and re-encodes a full-size JPEG.
  *
- * @return true if a corrected copy was saved alongside the original.
+ * @return the saved files: the original, then the corrected copy if any.
  */
-fun saveDivePhoto(context: Context, image: ImageProxy, state: DiveUiState): Boolean {
+fun saveDivePhoto(context: Context, image: ImageProxy, state: DiveUiState): List<Uri> {
     val gains = state.colorGains
     val saveCorrected = state.isDepthFilterEnabled && !gains.isIdentity
 
@@ -55,7 +53,7 @@ fun saveDivePhoto(context: Context, image: ImageProxy, state: DiveUiState): Bool
     )
 
     // Pixels are stored as the sensor delivered them; the EXIF orientation makes viewers rotate them
-    saveJpeg(
+    val original = saveJpeg(
         context, "IMG_DIVE_$name", ORIGINALS_DIR, now,
         exif = mapOf(
             ExifInterface.TAG_ORIENTATION to exifOrientation(rotationDegrees),
@@ -67,38 +65,37 @@ fun saveDivePhoto(context: Context, image: ImageProxy, state: DiveUiState): Bool
 
     if (!saveCorrected) {
         bitmap?.recycle()
-        return false
+        return listOf(original)
     }
 
-    val corrected = rotateAndCorrect(bitmap!!, rotationDegrees, gains)
+    val correction = UnderwaterAutoCorrection.analyze(bitmap!!)
+    val corrected = rotate(bitmap, rotationDegrees)
     bitmap.recycle()
-    try {
+    correction.applyInPlace(corrected)
+    val correctedUri = try {
         saveJpeg(
             context, "IMG_DIVE_${name}_corr", CORRECTED_DIR, now,
             exif = mapOf(
                 ExifInterface.TAG_USER_COMMENT to String.format(
-                    Locale.US, "%s gains=%.2f,%.2f,%.2f", diveInfo, gains.red, gains.green, gains.blue
+                    Locale.US, "%s %s", diveInfo, correction
                 )
             )
         ) { out -> corrected.compress(Bitmap.CompressFormat.JPEG, 95, out) }
     } finally {
         corrected.recycle()
     }
-    return true
+    return listOf(original, correctedUri)
 }
 
-/** Rotates upright and applies the gains in a single draw. */
-private fun rotateAndCorrect(source: Bitmap, rotationDegrees: Int, gains: ColorGains): Bitmap {
+/** Rotates upright into a new mutable bitmap. */
+private fun rotate(source: Bitmap, rotationDegrees: Int): Bitmap {
     val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
     val bounds = RectF(0f, 0f, source.width.toFloat(), source.height.toFloat())
     matrix.mapRect(bounds)
     matrix.postTranslate(-bounds.left, -bounds.top)
 
     val result = Bitmap.createBitmap(bounds.width().toInt(), bounds.height().toInt(), Bitmap.Config.ARGB_8888)
-    val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
-        colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setScale(gains.red, gains.green, gains.blue, 1f) })
-    }
-    Canvas(result).drawBitmap(source, matrix, paint)
+    Canvas(result).drawBitmap(source, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
     return result
 }
 

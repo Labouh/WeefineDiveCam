@@ -29,8 +29,16 @@ data class DiveUiState(
     val diveStartTime: Long? = null,
     val isDepthFilterEnabled: Boolean = true,
     val waterType: WaterType = WaterType.CLEAR_OCEAN,
-    val sleepLevel: SleepLevel = SleepLevel.AWAKE
+    val sleepLevel: SleepLevel = SleepLevel.AWAKE,
+    val isHousingLost: Boolean = false // Disconnected longer than a short dropout: black screen
 ) {
+    /**
+     * Unbound in deep sleep and while the housing is lost, since no button could trigger it then.
+     * A video being filmed keeps it running: losing the footage is worse than the battery drain.
+     */
+    val isCameraOn: Boolean
+        get() = sleepLevel != SleepLevel.CAMERA_OFF && (!isHousingLost || isRecording)
+
     val colorGains: ColorGains
         get() = if (isDepthFilterEnabled) WaterColorCorrection.gains(depth, waterType) else ColorGains.IDENTITY
 }

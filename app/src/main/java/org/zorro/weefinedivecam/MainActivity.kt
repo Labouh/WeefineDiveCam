@@ -36,8 +36,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.isGranted
-import com.google.accompanist.permissions.rememberPermissionState
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -55,13 +53,19 @@ fun MainPermissionChecker(onPermissionsGranted: @Composable () -> Unit) {
         )
     )
 
-    // The microphone is optional: without it videos are simply silent, so it doesn't block the app.
-    // Asked separately so installs that already granted the others still get the prompt.
-    val audioPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+    // Optional: without the microphone videos are silent, without location photos aren't geotagged,
+    // so they don't block the app. Asked separately so installs that already granted the others get the prompt.
+    val optionalPermissions = rememberMultiplePermissionsState(
+        permissions = listOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+    )
 
     if (permissionsState.allPermissionsGranted) {
         LaunchedEffect(Unit) {
-            if (!audioPermission.status.isGranted) audioPermission.launchPermissionRequest()
+            if (!optionalPermissions.allPermissionsGranted) optionalPermissions.launchMultiplePermissionRequest()
         }
         onPermissionsGranted()
     } else {
@@ -134,9 +138,9 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        // The unbound use cases are unusable after a deep sleep; fresh ones arrive via onCameraReady
-                        LaunchedEffect(uiState.sleepLevel) {
-                            if (uiState.sleepLevel == SleepLevel.CAMERA_OFF) {
+                        // The unbound use cases are unusable once the camera stops; fresh ones arrive via onCameraReady
+                        LaunchedEffect(uiState.isCameraOn) {
+                            if (!uiState.isCameraOn) {
                                 activeImageCapture = null
                                 activeVideoCapture = null
                                 activeCamera = null
@@ -181,10 +185,15 @@ class MainActivity : ComponentActivity() {
                             }
 
                             // Battery saver: black screen over everything
-                            if (uiState.sleepLevel != SleepLevel.AWAKE) {
+                            if (uiState.isHousingLost) {
                                 SleepOverlay(
-                                    depth = uiState.depth,
-                                    temperature = uiState.temperature,
+                                    message = "Housing connection lost",
+                                    phoneBattery = phoneBattery,
+                                    onTap = { viewModel.dismissHousingLost() }
+                                )
+                            } else if (uiState.sleepLevel != SleepLevel.AWAKE) {
+                                SleepOverlay(
+                                    message = String.format(Locale.getDefault(), "%.1f m   %.1f °C", uiState.depth, uiState.temperature),
                                     phoneBattery = phoneBattery,
                                     onTap = { viewModel.wakeUp() }
                                 )
@@ -199,13 +208,16 @@ class MainActivity : ComponentActivity() {
     private fun capturePhoto(imageCapture: ImageCapture) {
         // Snapshot the telemetry at shutter time, not when processing finishes
         val state = viewModel.uiState.value
+        val takenAt = System.currentTimeMillis()
 
         imageCapture.takePicture(
             photoExecutor,
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
                     val message = try {
-                        if (saveDivePhoto(this@MainActivity, image, state)) "Photo saved (+ corrected)" else "Photo saved"
+                        val uris = saveDivePhoto(this@MainActivity, image, state)
+                        viewModel.onPhotosSaved(uris, takenAt, state.depth)
+                        if (uris.size > 1) "Photo saved (+ corrected)" else "Photo saved"
                     } catch (e: Exception) {
                         "Save failed: ${e.message}"
                     }
@@ -229,6 +241,7 @@ class MainActivity : ComponentActivity() {
         val mediaStoreOutputOptions = MediaStoreOutputOptions
             .Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
             .setContentValues(contentValues)
+            .apply { viewModel.videoLocation?.let { setLocation(it) } }
             .build()
 
         return videoCapture.output

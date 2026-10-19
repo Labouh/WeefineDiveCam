@@ -119,7 +119,7 @@ fun DiveCameraScreen(
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         // Camera is at the bottom (Z=0). Leaving composition unbinds it (deep sleep)
-        if (uiState.sleepLevel != SleepLevel.CAMERA_OFF) {
+        if (uiState.isCameraOn) {
             CameraPreview(
                 colorGains = uiState.colorGains,
                 modifier = Modifier.fillMaxSize(),

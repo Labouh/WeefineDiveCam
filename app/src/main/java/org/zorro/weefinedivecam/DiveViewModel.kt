@@ -2,6 +2,8 @@ package org.zorro.weefinedivecam
 
 import android.app.Application
 import android.content.Context
+import android.location.Location
+import android.net.Uri
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.minutes
@@ -36,9 +39,19 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
 
     private var bleManager: WeefineBluetoothManager? = null
 
+    private val geotagger = DiveGeotagger(application, viewModelScope) {
+        _uiState.value.let { state -> if (state.isBluetoothConnected) state.depth else null }
+    }
+
+    /** Last GPS position if recent, written into videos when they start (they can't be tagged later). */
+    val videoLocation: Location? get() = geotagger.recentLocation
+
     // Last housing button press (elapsedRealtime), drives the automatic sleep levels
     @Volatile
     private var lastActivityAt = SystemClock.elapsedRealtime()
+
+    // Pending switch to the "housing lost" screen, cancelled if the link comes back in time
+    private var housingLostJob: Job? = null
 
     init {
         bleManager = WeefineBluetoothManager(
@@ -59,9 +72,8 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
                 handleHousingButton(buttonCode)
             },
             onConnectionChanged = { isConnected ->
-                _uiState.update { it.copy(isBluetoothConnected = isConnected) }
-                // Without the housing no button can wake the screen: show the camera and the warning
-                if (!isConnected) wakeUp()
+                // Hop to the main thread so connection events and the timer below never race
+                viewModelScope.launch { onHousingConnectionChanged(isConnected) }
             },
             onDeviceFound = { newDevice ->
                 _uiState.update { state ->
@@ -85,6 +97,35 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
                 updateSleepLevel()
             }
         }
+    }
+
+    /**
+     * Once the housing has been gone for a while (switched off at the end of the dive, or out of
+     * range) the screen goes black and the camera stops, so the phone doesn't drain in the housing.
+     * Short underwater dropouts are ignored. The normal screen comes back on reconnection.
+     */
+    private fun onHousingConnectionChanged(isConnected: Boolean) {
+        if (isConnected) {
+            housingLostJob?.cancel()
+            housingLostJob = null
+            val wasLost = _uiState.value.isHousingLost
+            _uiState.update { it.copy(isBluetoothConnected = true, isHousingLost = false) }
+            if (wasLost) wakeUp()
+        } else {
+            _uiState.update { it.copy(isBluetoothConnected = false) }
+            if (housingLostJob?.isActive != true) {
+                housingLostJob = viewModelScope.launch {
+                    delay(HOUSING_LOST_AFTER)
+                    _uiState.update { it.copy(isHousingLost = true) }
+                }
+            }
+        }
+    }
+
+    /** Tap on the black screen, on land: back to the camera, with the red warning in the HUD. */
+    fun dismissHousingLost() {
+        _uiState.update { it.copy(isHousingLost = false) }
+        wakeUp()
     }
 
     private fun updateSleepLevel() {
@@ -129,6 +170,11 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleDepthFilter() {
         _uiState.update { it.copy(isDepthFilterEnabled = !it.isDepthFilterEnabled) }
+    }
+
+    /** Called from the photo thread once the files are written; GPS is added when a fix is available. */
+    fun onPhotosSaved(uris: List<Uri>, takenAt: Long, depth: Double) {
+        viewModelScope.launch { geotagger.addPhotos(uris, takenAt, depth) }
     }
 
     /** Chosen before the dive for each site; remembered across launches. */
@@ -201,6 +247,7 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         val SCREEN_OFF_AFTER = 1.minutes
         val CAMERA_OFF_AFTER = 5.minutes
+        val HOUSING_LOST_AFTER = 5.seconds
         const val KEY_WATER_TYPE = "water_type"
     }
 
@@ -208,5 +255,6 @@ class DiveViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         bleManager?.stopScanning()
         bleManager?.disconnect()
+        geotagger.release()
     }
 }
