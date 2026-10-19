@@ -202,11 +202,8 @@ class DiveGeotagger(
                 setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, if (latitude >= 0) "N" else "S")
                 setAttribute(ExifInterface.TAG_GPS_LONGITUDE, toExifDms(longitude))
                 setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, if (longitude >= 0) "E" else "W")
-                // Depth as altitude below sea level: photo tools then show it on the map
-                if (depth > 0) {
-                    setAttribute(ExifInterface.TAG_GPS_ALTITUDE, "${(depth * 10).roundToInt()}/10")
-                    setAttribute(ExifInterface.TAG_GPS_ALTITUDE_REF, "1")
-                }
+                // Already written at capture; kept for photos saved by older versions
+                depthAsAltitude(depth).forEach { (tag, value) -> setAttribute(tag, value) }
                 saveAttributes()
             }
         }

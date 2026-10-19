@@ -5,7 +5,6 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,7 +26,6 @@ import kotlin.time.Duration.Companion.seconds
 fun CameraHudOverlay(
     uiState: DiveUiState,
     phoneBattery: Int?,
-    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -77,7 +75,7 @@ fun CameraHudOverlay(
             modifier = Modifier.size(20.dp)
         )
         Text(
-            text = if (uiState.isDepthFilterEnabled) "FILTER ${uiState.waterType.label.uppercase()}" else "FILTER OFF",
+            text = if (uiState.isDepthFilterEnabled) "FILTER ON" else "FILTER OFF",
             color = if (uiState.isDepthFilterEnabled) Color(0xFFFF8A65) else Color.Gray,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold
@@ -98,15 +96,6 @@ fun CameraHudOverlay(
         if (phoneBattery != null) {
             BatteryIndicator(Icons.Default.Smartphone, "Phone battery", phoneBattery)
         }
-        // Touch only works on land: settings are chosen before the dive
-        Icon(
-            imageVector = Icons.Default.Settings,
-            contentDescription = "Settings",
-            tint = Color.White,
-            modifier = Modifier
-                .size(20.dp)
-                .clickable(onClick = onOpenSettings)
-        )
     }
 }
 
@@ -114,14 +103,15 @@ fun CameraHudOverlay(
 fun DiveCameraScreen(
     uiState: DiveUiState,
     phoneBattery: Int?,
-    onOpenSettings: () -> Unit,
+    shutterCount: Int,
     onCameraReady: (ImageCapture, VideoCapture<Recorder>, Camera) -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         // Camera is at the bottom (Z=0). Leaving composition unbinds it (deep sleep)
         if (uiState.isCameraOn) {
             CameraPreview(
-                colorGains = uiState.colorGains,
+                isColorCorrectionOn = uiState.isColorCorrectionOn,
+                shutterCount = shutterCount,
                 modifier = Modifier.fillMaxSize(),
                 onCameraReady = onCameraReady
             )
@@ -131,7 +121,6 @@ fun DiveCameraScreen(
         CameraHudOverlay(
             uiState = uiState,
             phoneBattery = phoneBattery,
-            onOpenSettings = onOpenSettings,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)) // Stay below the status bar

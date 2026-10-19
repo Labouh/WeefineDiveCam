@@ -28,7 +28,6 @@ data class DiveUiState(
     val housingBattery: Int = 100,
     val diveStartTime: Long? = null,
     val isDepthFilterEnabled: Boolean = true,
-    val waterType: WaterType = WaterType.CLEAR_OCEAN,
     val sleepLevel: SleepLevel = SleepLevel.AWAKE,
     val isHousingLost: Boolean = false // Disconnected longer than a short dropout: black screen
 ) {
@@ -39,6 +38,7 @@ data class DiveUiState(
     val isCameraOn: Boolean
         get() = sleepLevel != SleepLevel.CAMERA_OFF && (!isHousingLost || isRecording)
 
-    val colorGains: ColorGains
-        get() = if (isDepthFilterEnabled) WaterColorCorrection.gains(depth, waterType) else ColorGains.IDENTITY
+    /** Colour correction applies under water only, when the diver hasn't switched it off. */
+    val isColorCorrectionOn: Boolean
+        get() = isDepthFilterEnabled && depth >= UnderwaterAutoCorrection.MIN_DEPTH_M
 }

@@ -15,6 +15,7 @@ import androidx.camera.core.ImageProxy
 import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private const val CORRECTED_DIR = "Pictures/WeefineDiveCam"
 private const val ORIGINALS_DIR = "Pictures/WeefineDiveCam/Original"
@@ -32,8 +33,7 @@ private const val ORIGINALS_DIR = "Pictures/WeefineDiveCam/Original"
  * @return the saved files: the original, then the corrected copy if any.
  */
 fun saveDivePhoto(context: Context, image: ImageProxy, state: DiveUiState): List<Uri> {
-    val gains = state.colorGains
-    val saveCorrected = state.isDepthFilterEnabled && !gains.isIdentity
+    val saveCorrected = state.isColorCorrectionOn
 
     val rotationDegrees = image.imageInfo.rotationDegrees
     val jpegBytes = if (image.format == ImageFormat.JPEG) {
@@ -48,8 +48,8 @@ fun saveDivePhoto(context: Context, image: ImageProxy, state: DiveUiState): List
     val now = System.currentTimeMillis()
     val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(now)
     val diveInfo = String.format(
-        Locale.US, "WeefineDiveCam depth=%.1fm temp=%.1fC water=%s",
-        state.depth, state.temperature, state.waterType.name
+        Locale.US, "WeefineDiveCam depth=%.1fm temp=%.1fC",
+        state.depth, state.temperature
     )
 
     // Pixels are stored as the sensor delivered them; the EXIF orientation makes viewers rotate them
@@ -58,7 +58,7 @@ fun saveDivePhoto(context: Context, image: ImageProxy, state: DiveUiState): List
         exif = mapOf(
             ExifInterface.TAG_ORIENTATION to exifOrientation(rotationDegrees),
             ExifInterface.TAG_USER_COMMENT to diveInfo
-        )
+        ) + depthAsAltitude(state.depth)
     ) { out ->
         if (jpegBytes != null) out.write(jpegBytes) else bitmap!!.compress(Bitmap.CompressFormat.JPEG, 95, out)
     }
@@ -79,7 +79,7 @@ fun saveDivePhoto(context: Context, image: ImageProxy, state: DiveUiState): List
                 ExifInterface.TAG_USER_COMMENT to String.format(
                     Locale.US, "%s %s", diveInfo, correction
                 )
-            )
+            ) + depthAsAltitude(state.depth)
         ) { out -> corrected.compress(Bitmap.CompressFormat.JPEG, 95, out) }
     } finally {
         corrected.recycle()
@@ -98,6 +98,20 @@ private fun rotate(source: Bitmap, rotationDegrees: Int): Bitmap {
     Canvas(result).drawBitmap(source, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
     return result
 }
+
+/**
+ * Depth as altitude below sea level, written at capture time so photo tools can show and sort
+ * by it even if no GPS fix is found after the dive. The geotagger adds the position later.
+ */
+fun depthAsAltitude(depth: Double): Map<String, String> =
+    if (depth > 0) {
+        mapOf(
+            ExifInterface.TAG_GPS_ALTITUDE to "${(depth * 10).roundToInt()}/10",
+            ExifInterface.TAG_GPS_ALTITUDE_REF to "1"
+        )
+    } else {
+        emptyMap()
+    }
 
 private fun exifOrientation(rotationDegrees: Int): String = when (rotationDegrees) {
     90 -> ExifInterface.ORIENTATION_ROTATE_90

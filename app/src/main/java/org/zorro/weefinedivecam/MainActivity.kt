@@ -113,12 +113,15 @@ class MainActivity : ComponentActivity() {
                         var activeVideoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
                         var activeCamera by remember { mutableStateOf<Camera?>(null) }
                         var currentRecording by remember { mutableStateOf<Recording?>(null) }
-                        var showSettings by remember { mutableStateOf(false) }
+                        var shutterCount by remember { mutableIntStateOf(0) }
 
                         LaunchedEffect(Unit) {
                             viewModel.cameraActionEvent.collect { event ->
                                 when (event) {
-                                    "TAKE_PHOTO" -> activeImageCapture?.let { capturePhoto(it) }
+                                    "TAKE_PHOTO" -> activeImageCapture?.let {
+                                        capturePhoto(it)
+                                        shutterCount++
+                                    }
                                     "START_RECORDING" -> activeVideoCapture?.let { currentRecording = startVideoRecording(it) }
                                     "STOP_RECORDING" -> {
                                         currentRecording?.stop()
@@ -156,7 +159,7 @@ class MainActivity : ComponentActivity() {
                             DiveCameraScreen(
                                 uiState = uiState,
                                 phoneBattery = phoneBattery,
-                                onOpenSettings = { showSettings = true },
+                                shutterCount = shutterCount,
                                 onCameraReady = { boundCapture, boundVideo, boundCamera ->
                                     activeImageCapture = boundCapture
                                     activeVideoCapture = boundVideo
@@ -173,14 +176,6 @@ class MainActivity : ComponentActivity() {
                                     onStartScan = { viewModel.startScanning() },
                                     onStopScan = { viewModel.stopScanning() },
                                     onDeviceSelected = { viewModel.connectToDevice(it) }
-                                )
-                            }
-
-                            if (showSettings) {
-                                SettingsDialog(
-                                    waterType = uiState.waterType,
-                                    onWaterTypeSelected = { viewModel.setWaterType(it) },
-                                    onDismiss = { showSettings = false }
                                 )
                             }
 
